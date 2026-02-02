@@ -1,0 +1,1515 @@
+openapi: 3.0.3
+info:
+  title: Zinc Partner API
+  description: |
+    Zinc Partner API is a REST API used to integrate the Zinc background checking service into partner systems.
+    
+    This API is intended to allow partners to:
+    - Start background check requests for mutual customers
+    - View packages created by the customer
+    - Receive results of background check requests
+    
+    ## Screening Process
+    1. Start a new background check request via the `/checks` endpoint
+    2. Zinc contacts the candidate using the contact information provided
+    3. The candidate creates an account with Zinc and submits the required information
+    4. Zinc processes the data and conducts the checks
+    5. All updates are returned via the `/results` endpoint or sent to the registered webhook URL
+    
+    ## Authentication
+    All API requests require authentication using an API key. You can generate an API key from your Zinc account settings.
+    
+    ## Support
+    For integration requests, contact: integrations@zincwork.com
+  version: 1.0.0
+  contact:
+    name: Zinc Integrations Team
+    email: integrations@zincwork.com
+    url: https://zincwork.com
+  license:
+    name: Proprietary
+    url: https://zincwork.com/terms
+
+servers:
+  - url: https://api.zincwork.com/v1
+    description: Production API Server
+  - url: https://api-sandbox.zincwork.com/v1
+    description: Sandbox/Testing API Server
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: Checks
+    description: Operations for managing background check requests
+  - name: Packages
+    description: Operations for managing check packages
+  - name: Results
+    description: Operations for retrieving check results
+  - name: Candidates
+    description: Operations for managing candidates
+  - name: Webhooks
+    description: Webhook configuration and management
+
+paths:
+  /checks:
+    post:
+      tags:
+        - Checks
+      summary: Start a new background check
+      description: |
+        Initiates a new background check request for a candidate. 
+        Zinc will contact the candidate using the provided contact information to begin the verification process.
+      operationId: createCheck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCheckRequest'
+            examples:
+              basicCheck:
+                summary: Basic background check
+                value:
+                  candidate:
+                    first_name: "John"
+                    last_name: "Doe"
+                    email: "john.doe@example.com"
+                    phone: "+44 7700 900000"
+                  package_id: "pkg_abc123"
+                  webhook_url: "https://yourapp.com/webhooks/zinc"
+              customChecks:
+                summary: Custom individual checks
+                value:
+                  candidate:
+                    first_name: "Jane"
+                    last_name: "Smith"
+                    email: "jane.smith@example.com"
+                    phone: "+1 555 123 4567"
+                    date_of_birth: "1990-05-15"
+                    nationality: "GB"
+                  checks:
+                    - type: "criminal_record"
+                    - type: "employment_reference"
+                      quantity: 2
+                    - type: "education_verification"
+                    - type: "right_to_work"
+                  webhook_url: "https://yourapp.com/webhooks/zinc"
+                  external_id: "ATS-12345"
+      responses:
+        '201':
+          description: Background check request created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResponse'
+        '400':
+          description: Bad request - Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Entity - Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorResponse'
+        '429':
+          description: Too Many Requests - Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags:
+        - Checks
+      summary: List all background checks
+      description: Retrieve a paginated list of all background check requests
+      operationId: listChecks
+      parameters:
+        - name: page
+          in: query
+          description: Page number for pagination
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: per_page
+          in: query
+          description: Number of results per page
+          schema:
+            type: integer
+            default: 25
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          description: Filter by check status
+          schema:
+            type: string
+            enum:
+              - pending
+              - in_progress
+              - awaiting_candidate
+              - action_required
+              - completed
+              - cancelled
+        - name: created_after
+          in: query
+          description: Filter checks created after this date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: created_before
+          in: query
+          description: Filter checks created before this date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: external_id
+          in: query
+          description: Filter by external/partner reference ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /checks/{check_id}:
+    get:
+      tags:
+        - Checks
+      summary: Get a specific background check
+      description: Retrieve details of a specific background check request by ID
+      operationId: getCheck
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          description: Unique identifier of the background check
+          schema:
+            type: string
+            example: "chk_abc123xyz"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckDetailResponse'
+        '404':
+          description: Check not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Checks
+      summary: Cancel a background check
+      description: |
+        Cancel a pending or in-progress background check request.
+        Note: Completed checks cannot be cancelled.
+      operationId: cancelCheck
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          description: Unique identifier of the background check
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Check cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResponse'
+        '400':
+          description: Cannot cancel - check already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Check not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /checks/{check_id}/remind:
+    post:
+      tags:
+        - Checks
+      summary: Send reminder to candidate
+      description: Send a reminder notification to the candidate to complete their background checks
+      operationId: remindCandidate
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          description: Unique identifier of the background check
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: string
+                  enum:
+                    - email
+                    - sms
+                    - both
+                  default: both
+                  description: Communication channel for the reminder
+                message:
+                  type: string
+                  description: Optional custom message to include
+                  maxLength: 500
+      responses:
+        '200':
+          description: Reminder sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '400':
+          description: Cannot send reminder - check not in appropriate status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /results:
+    get:
+      tags:
+        - Results
+      summary: Get all check results
+      description: |
+        Retrieve results for all completed background checks.
+        Results are returned for checks that have been fully processed.
+      operationId: listResults
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+        - name: check_id
+          in: query
+          description: Filter by specific check ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by result status
+          schema:
+            type: string
+            enum:
+              - clear
+              - review_required
+              - action_required
+              - flagged
+        - name: updated_after
+          in: query
+          description: Filter results updated after this date
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultsListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /results/{check_id}:
+    get:
+      tags:
+        - Results
+      summary: Get results for a specific check
+      description: Retrieve detailed results for a specific background check
+      operationId: getCheckResults
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          description: Unique identifier of the background check
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResultResponse'
+        '404':
+          description: Check or results not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /results/{check_id}/report:
+    get:
+      tags:
+        - Results
+      summary: Download check report
+      description: Download a PDF report of the background check results
+      operationId: downloadReport
+      parameters:
+        - name: check_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Report format
+          schema:
+            type: string
+            enum:
+              - pdf
+              - json
+            default: pdf
+      responses:
+        '200':
+          description: Report file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckResultResponse'
+        '404':
+          description: Report not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /packages:
+    get:
+      tags:
+        - Packages
+      summary: List available check packages
+      description: |
+        Retrieve all check packages available to your organization.
+        Packages are pre-configured bundles of checks that can be applied to candidates.
+      operationId: listPackages
+      parameters:
+        - name: active
+          in: query
+          description: Filter by active/inactive status
+          schema:
+            type: boolean
+        - name: country
+          in: query
+          description: Filter packages available for a specific country (ISO 3166-1 alpha-2)
+          schema:
+            type: string
+            example: "GB"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /packages/{package_id}:
+    get:
+      tags:
+        - Packages
+      summary: Get a specific package
+      description: Retrieve details of a specific check package
+      operationId: getPackage
+      parameters:
+        - name: package_id
+          in: path
+          required: true
+          description: Unique identifier of the package
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackageResponse'
+        '404':
+          description: Package not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /candidates:
+    get:
+      tags:
+        - Candidates
+      summary: List candidates
+      description: Retrieve a list of all candidates with background checks
+      operationId: listCandidates
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 25
+            maximum: 100
+        - name: email
+          in: query
+          description: Filter by candidate email
+          schema:
+            type: string
+            format: email
+        - name: external_id
+          in: query
+          description: Filter by external reference ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateListResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /candidates/{candidate_id}:
+    get:
+      tags:
+        - Candidates
+      summary: Get candidate details
+      description: Retrieve details of a specific candidate
+      operationId: getCandidate
+      parameters:
+        - name: candidate_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateResponse'
+        '404':
+          description: Candidate not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /webhooks:
+    get:
+      tags:
+        - Webhooks
+      summary: List webhook configurations
+      description: Retrieve all configured webhooks for your organization
+      operationId: listWebhooks
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookListResponse'
+
+    post:
+      tags:
+        - Webhooks
+      summary: Create a webhook configuration
+      description: Configure a new webhook endpoint for receiving check updates
+      operationId: createWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+      responses:
+        '201':
+          description: Webhook created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+        '400':
+          description: Invalid webhook configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /webhooks/{webhook_id}:
+    get:
+      tags:
+        - Webhooks
+      summary: Get webhook details
+      operationId: getWebhook
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+        '404':
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags:
+        - Webhooks
+      summary: Update webhook configuration
+      operationId: updateWebhook
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookRequest'
+      responses:
+        '200':
+          description: Webhook updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+
+    delete:
+      tags:
+        - Webhooks
+      summary: Delete webhook configuration
+      operationId: deleteWebhook
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Webhook deleted successfully
+        '404':
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /webhooks/{webhook_id}/test:
+    post:
+      tags:
+        - Webhooks
+      summary: Test webhook endpoint
+      description: Send a test payload to verify webhook configuration
+      operationId: testWebhook
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Test webhook sent successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  response_code:
+                    type: integer
+                  message:
+                    type: string
+
+  /check-types:
+    get:
+      tags:
+        - Checks
+      summary: List available check types
+      description: Retrieve all available background check types
+      operationId: listCheckTypes
+      parameters:
+        - name: country
+          in: query
+          description: Filter check types available for a specific country
+          schema:
+            type: string
+            example: "GB"
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckTypeListResponse'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for authentication. Generate from your Zinc account settings.
+        Include in all requests as a header: `X-API-Key: your_api_key_here`
+
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token authentication (alternative to API key)
+
+  schemas:
+    CreateCheckRequest:
+      type: object
+      required:
+        - candidate
+      properties:
+        candidate:
+          $ref: '#/components/schemas/CandidateInput'
+        package_id:
+          type: string
+          description: ID of the check package to use (mutually exclusive with 'checks')
+          example: "pkg_abc123"
+        checks:
+          type: array
+          description: Array of individual checks to perform (mutually exclusive with 'package_id')
+          items:
+            $ref: '#/components/schemas/CheckTypeInput'
+        webhook_url:
+          type: string
+          format: uri
+          description: URL to receive webhook notifications for this check
+          example: "https://yourapp.com/webhooks/zinc"
+        external_id:
+          type: string
+          description: Your external reference ID for this check (e.g., ATS candidate ID)
+          maxLength: 255
+          example: "ATS-12345"
+        callback_url:
+          type: string
+          format: uri
+          description: URL to redirect candidate after completing their checks
+        custom_fields:
+          type: object
+          description: Custom metadata fields
+          additionalProperties:
+            type: string
+        priority:
+          type: string
+          enum:
+            - normal
+            - high
+          default: normal
+          description: Processing priority
+
+    CandidateInput:
+      type: object
+      required:
+        - first_name
+        - last_name
+        - email
+      properties:
+        first_name:
+          type: string
+          description: Candidate's first name
+          example: "John"
+          maxLength: 100
+        last_name:
+          type: string
+          description: Candidate's last name
+          example: "Doe"
+          maxLength: 100
+        middle_name:
+          type: string
+          description: Candidate's middle name
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          description: Candidate's email address
+          example: "john.doe@example.com"
+        phone:
+          type: string
+          description: Candidate's phone number (include country code)
+          example: "+44 7700 900000"
+        date_of_birth:
+          type: string
+          format: date
+          description: Candidate's date of birth (YYYY-MM-DD)
+          example: "1990-05-15"
+        nationality:
+          type: string
+          description: Candidate's nationality (ISO 3166-1 alpha-2 country code)
+          example: "GB"
+        address:
+          $ref: '#/components/schemas/Address'
+        job_title:
+          type: string
+          description: Position the candidate is applying for
+          example: "Software Engineer"
+        department:
+          type: string
+          description: Department for the role
+          example: "Engineering"
+        start_date:
+          type: string
+          format: date
+          description: Expected start date
+
+    CheckTypeInput:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          description: Type of background check
+          enum:
+            - criminal_record
+            - dbs_basic
+            - dbs_standard
+            - dbs_enhanced
+            - employment_reference
+            - professional_reference
+            - character_reference
+            - education_verification
+            - professional_qualification
+            - right_to_work
+            - identity_verification
+            - address_verification
+            - credit_check
+            - financial_sanctions
+            - media_search
+            - directorship_check
+            - global_watchlist
+            - social_media_check
+        quantity:
+          type: integer
+          description: Number of checks of this type (for references)
+          minimum: 1
+          default: 1
+        country:
+          type: string
+          description: Country for the check (ISO 3166-1 alpha-2)
+          example: "GB"
+        options:
+          type: object
+          description: Check-specific options
+          additionalProperties: true
+
+    Address:
+      type: object
+      properties:
+        line1:
+          type: string
+          description: Address line 1
+          example: "123 Main Street"
+        line2:
+          type: string
+          description: Address line 2
+        city:
+          type: string
+          description: City
+          example: "London"
+        region:
+          type: string
+          description: State/Province/Region
+          example: "Greater London"
+        postal_code:
+          type: string
+          description: Postal/ZIP code
+          example: "SW1A 1AA"
+        country:
+          type: string
+          description: Country (ISO 3166-1 alpha-2)
+          example: "GB"
+
+    CheckResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique check identifier
+          example: "chk_abc123xyz"
+        status:
+          type: string
+          enum:
+            - pending
+            - in_progress
+            - awaiting_candidate
+            - action_required
+            - completed
+            - cancelled
+          description: Current status of the check
+        candidate:
+          $ref: '#/components/schemas/CandidateResponse'
+        package_id:
+          type: string
+          description: Package ID if using a package
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndividualCheck'
+        external_id:
+          type: string
+          description: Your external reference ID
+        profile_url:
+          type: string
+          format: uri
+          description: URL to view the check in Zinc dashboard
+        webhook_url:
+          type: string
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        estimated_completion:
+          type: string
+          format: date-time
+          description: Estimated completion date
+
+    CheckDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/CheckResponse'
+        - type: object
+          properties:
+            results:
+              $ref: '#/components/schemas/CheckResultResponse'
+            timeline:
+              type: array
+              items:
+                $ref: '#/components/schemas/TimelineEvent'
+            documents:
+              type: array
+              items:
+                $ref: '#/components/schemas/Document'
+
+    IndividualCheck:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Individual check identifier
+        type:
+          type: string
+          description: Check type
+        status:
+          type: string
+          enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+            - cancelled
+        result:
+          type: string
+          enum:
+            - clear
+            - review_required
+            - action_required
+            - flagged
+            - unable_to_verify
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        details:
+          type: object
+          description: Check-specific result details
+          additionalProperties: true
+
+    CheckListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckResponse'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    CheckResultResponse:
+      type: object
+      properties:
+        check_id:
+          type: string
+        overall_status:
+          type: string
+          enum:
+            - clear
+            - review_required
+            - action_required
+            - flagged
+        completed_at:
+          type: string
+          format: date-time
+        individual_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndividualCheckResult'
+        summary:
+          type: string
+          description: Human-readable summary of results
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        report_url:
+          type: string
+          format: uri
+          description: URL to download the full report
+
+    IndividualCheckResult:
+      type: object
+      properties:
+        check_type:
+          type: string
+        status:
+          type: string
+          enum:
+            - clear
+            - review_required
+            - action_required
+            - flagged
+            - unable_to_verify
+        verified:
+          type: boolean
+        details:
+          type: object
+          additionalProperties: true
+        source:
+          type: string
+          description: Data source for verification
+        verified_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+
+    ResultsListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckResultResponse'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    Flag:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Type of flag
+        severity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        description:
+          type: string
+        check_type:
+          type: string
+        recommended_action:
+          type: string
+
+    PackageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Package identifier
+          example: "pkg_abc123"
+        name:
+          type: string
+          description: Package name
+          example: "Standard Employment Package"
+        description:
+          type: string
+          description: Package description
+        checks:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              quantity:
+                type: integer
+              description:
+                type: string
+        countries:
+          type: array
+          items:
+            type: string
+          description: Countries where this package is available
+        active:
+          type: boolean
+        price:
+          type: object
+          properties:
+            amount:
+              type: number
+            currency:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    PackageListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageResponse'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    CandidateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Candidate identifier
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+        status:
+          type: string
+          enum:
+            - invited
+            - in_progress
+            - submitted
+            - completed
+        profile_url:
+          type: string
+          format: uri
+        checks:
+          type: array
+          items:
+            type: string
+          description: List of check IDs associated with this candidate
+        created_at:
+          type: string
+          format: date-time
+
+    CandidateListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandidateResponse'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    CreateWebhookRequest:
+      type: object
+      required:
+        - url
+        - events
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Webhook endpoint URL
+          example: "https://yourapp.com/webhooks/zinc"
+        events:
+          type: array
+          items:
+            type: string
+            enum:
+              - check.created
+              - check.updated
+              - check.completed
+              - check.cancelled
+              - candidate.invited
+              - candidate.submitted
+              - result.available
+              - result.updated
+          description: Events to subscribe to
+        secret:
+          type: string
+          description: Secret key for webhook signature verification
+        active:
+          type: boolean
+          default: true
+        description:
+          type: string
+          description: Description of this webhook
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+        active:
+          type: boolean
+        description:
+          type: string
+
+    WebhookResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        active:
+          type: boolean
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_triggered_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    WebhookListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookResponse'
+
+    WebhookPayload:
+      type: object
+      description: Webhook payload sent to your endpoint
+      properties:
+        id:
+          type: string
+          description: Unique event ID
+        event:
+          type: string
+          description: Event type
+          enum:
+            - check.created
+            - check.updated
+            - check.completed
+            - check.cancelled
+            - candidate.invited
+            - candidate.submitted
+            - result.available
+            - result.updated
+        timestamp:
+          type: string
+          format: date-time
+        data:
+          type: object
+          description: Event-specific data
+          properties:
+            check_id:
+              type: string
+            candidate_id:
+              type: string
+            status:
+              type: string
+            external_id:
+              type: string
+
+    CheckTypeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CheckType'
+
+    CheckType:
+      type: object
+      properties:
+        type:
+          type: string
+          description: Check type identifier
+        name:
+          type: string
+          description: Human-readable name
+        description:
+          type: string
+        category:
+          type: string
+          enum:
+            - identity
+            - employment
+            - education
+            - criminal
+            - financial
+            - compliance
+            - reference
+        countries:
+          type: array
+          items:
+            type: string
+          description: Countries where this check is available
+        typical_turnaround:
+          type: string
+          description: Typical processing time
+          example: "2-3 business days"
+        required_fields:
+          type: array
+          items:
+            type: string
+          description: Required candidate fields for this check
+
+    TimelineEvent:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        event:
+          type: string
+        description:
+          type: string
+        actor:
+          type: string
+          enum:
+            - system
+            - candidate
+            - partner
+            - zinc
+
+    Document:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+          format: uri
+        uploaded_at:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      properties:
+        current_page:
+          type: integer
+        per_page:
+          type: integer
+        total_pages:
+          type: integer
+        total_count:
+          type: integer
+        has_next:
+          type: boolean
+        has_prev:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+              example: "unauthorized"
+            message:
+              type: string
+              description: Human-readable error message
+              example: "Invalid or missing API key"
+            details:
+              type: object
+              description: Additional error details
+              additionalProperties: true
+
+    ValidationErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "validation_error"
+            message:
+              type: string
+              example: "Validation failed"
+            errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    description: Field that failed validation
+                  message:
+                    type: string
+                    description: Validation error message
+                  code:
+                    type: string
+                    description: Validation error code
+
+  responses:
+    UnauthorizedError:
+      description: Authentication information is missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    
+    NotFoundError:
+      description: The specified resource was not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    
+    RateLimitError:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per hour
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
