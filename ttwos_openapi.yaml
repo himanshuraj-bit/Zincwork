@@ -1,0 +1,1096 @@
+openapi: 3.0.3
+
+info:
+  title: TTWOS Vendor API
+  description: |
+    OpenAPI specification for the TTWOS (Vodafone Germany) proprietary ticketing interface.
+
+    This spec is derived from the Movius–Vodafone integration requirements document (v1.0, Feb 2026).
+    Schemas marked with `[ASSUMED]` are inferred from partial examples in the requirements
+    document and must be confirmed with Vodafone Germany before implementation.
+
+    ## ⚠️ Authentication — TBD (Pending Vodafone Germany Confirmation)
+    The authentication mechanism for TTWOS has not been documented or shared.
+    Vodafone Germany must confirm one of the following before implementation begins:
+
+    - Bearer Token (OAuth2 / JWT) — Authorization: Bearer <token>
+    - API Key in Header — e.g. X-API-Key: <key>
+    - Basic Auth — Authorization: Basic <base64(username:password)>
+    - Custom / Proprietary scheme
+
+    Sync user account: `ttwos.movius`
+    All credentials to be provided by Vodafone Germany.
+
+  version: "1.0.0"
+  contact:
+    name: Vodafone Germany TTWOS Interface Team
+    email: yvonne.gans@vodafone.com
+
+servers:
+  - url: "{baseUrl}/ttwos"
+    description: TTWOS API Base URL — to be provided by Vodafone Germany
+    variables:
+      baseUrl:
+        default: "https://ttwos-placeholder.vodafone.de"
+        description: "⚠️ PLACEHOLDER — actual base URL must be confirmed by Vodafone Germany"
+
+# ─────────────────────────────────────────────
+# SECURITY — TBD
+# No security scheme is defined until Vodafone Germany confirms the auth mechanism.
+# Remove this comment and add the confirmed scheme here before implementation.
+# ─────────────────────────────────────────────
+security: []
+
+# ─────────────────────────────────────────────
+# TAGS
+# ─────────────────────────────────────────────
+tags:
+  - name: Polling
+    description: |
+      GET endpoints polled by AWS every 5 minutes (24x7) to pull ticket data,
+      status updates, notes, and attachments from TTWOS into Freshservice.
+  - name: Status Updates
+    description: |
+      PATCH endpoints that update TTWOS ticket status. Triggered by Freshservice
+      webhook events routed through AWS middleware.
+  - name: Correspondence
+    description: |
+      POST endpoints for pushing notes and file attachments from Freshservice
+      into TTWOS. Triggered by Freshservice webhook events via AWS middleware.
+
+# ─────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────
+components:
+
+  # Auth placeholder — to be replaced once confirmed by Vodafone
+  securitySchemes:
+    TBD_Auth:
+      type: http
+      scheme: bearer
+      description: |
+        ⚠️ TBD — Authentication mechanism not yet confirmed by Vodafone Germany.
+        This is a placeholder. Replace with the actual scheme (Bearer, ApiKey,
+        Basic, or custom) once confirmed. Sync user account is: ttwos.movius
+
+  schemas:
+
+    # ── RESPONSES ──────────────────────────────
+
+    TicketListItem:
+      type: object
+      description: A single ticket entry returned by the polling list endpoint.
+      properties:
+        TicketNumber:
+          type: string
+          maxLength: 17
+          example: "INC000001234567"
+          description: Unique TTWOS ticket identifier
+        Priority:
+          type: string
+          enum: ["1", "2", "3", "4"]
+          description: |
+            TTWOS Priority level:
+              1 = Critical
+              2 = Major
+              3 = Minor
+              4 = Low / Informational
+        UseCase:
+          type: string
+          maxLength: 30
+          description: Use case identifier associated with this ticket
+      required:
+        - TicketNumber
+        - Priority
+
+    TicketListResponse:
+      type: object
+      description: "[ASSUMED] Response envelope from OpGetTicketListByModifyDate"
+      properties:
+        Tickets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TicketListItem'
+        TotalCount:
+          type: integer
+          description: "[ASSUMED] Total number of tickets returned in this response"
+      required:
+        - Tickets
+
+    TicketDetail:
+      type: object
+      description: Full ticket detail returned by OpGetTicketById
+      properties:
+        TicketNumber:
+          type: string
+          maxLength: 17
+          example: "INC000001234567"
+        Status:
+          type: string
+          enum: ["Assigned", "Noticed", "In Process", "Answered", "Rejected", "Closed"]
+          description: Current TTWOS ticket status
+        Priority:
+          type: string
+          enum: ["1", "2", "3", "4"]
+          description: Current TTWOS priority
+        Subject:
+          type: string
+          description: Ticket subject — auto-generated in TTWOS from Category 1, 2, 3 values
+        Description:
+          type: string
+          description: Full ticket description including questionnaire template content
+        AssigneeName:
+          type: string
+          description: Name of the contact / IT admin (maps to Freshservice End User Name)
+        AssigneeEmail:
+          type: string
+          format: email
+          description: Email of the contact (maps to Freshservice End User Email)
+        AssigneePhone:
+          type: string
+          description: Phone number of the contact (maps to Freshservice End User Phone)
+        CustomerName:
+          type: string
+          description: Customer company name (maps to Freshservice customer custom field)
+        CustomerStreet:
+          type: string
+          description: Customer street address
+        CustomerHouseNo:
+          type: string
+          description: Customer house number
+        CustomerZip:
+          type: string
+          description: Customer postal code
+        CustomerCity:
+          type: string
+          description: Customer city
+        Category3:
+          type: string
+          description: TTWOS Category 3 value (maps to Freshservice Area field)
+        CreatedDate:
+          type: string
+          format: date-time
+          description: Ticket creation timestamp (maps to Freshservice Created Date)
+        ContactList:
+          type: array
+          description: List of contact/note entries on this ticket
+          items:
+            type: object
+            properties:
+              ContactID:
+                type: string
+                description: Identifier for this contact entry — used in OpGetContact
+        AttachmentList:
+          type: array
+          description: List of file attachments on this ticket
+          items:
+            type: object
+            properties:
+              AttachmentName:
+                type: string
+                description: File name — used in OpGetAttachment
+      required:
+        - TicketNumber
+        - Status
+        - Priority
+
+    ContactResponse:
+      type: object
+      description: Contact/note detail returned by OpGetContact
+      properties:
+        ContactID:
+          type: string
+          description: Unique identifier for this contact entry
+        ContactMessage:
+          type: string
+          description: The text body of the note or message
+        ContactMedium:
+          type: string
+          description: "[ASSUMED] Medium used (e.g. Interface, Phone, Email)"
+        ContactSubject:
+          type: string
+          description: Subject line of the contact entry
+        Status:
+          type: string
+          enum: ["Answered", "Rejected", "Pending", "Open"]
+          description: Status of this contact entry — drives reopen logic
+        CreatedDate:
+          type: string
+          format: date-time
+          description: "[ASSUMED] Timestamp when this contact was created"
+      required:
+        - ContactID
+        - ContactMessage
+
+    SuccessResponse:
+      type: object
+      description: "[ASSUMED] Generic success acknowledgement from TTWOS"
+      properties:
+        Success:
+          type: boolean
+          example: true
+        Message:
+          type: string
+          example: "Operation completed successfully"
+
+    ErrorResponse:
+      type: object
+      description: Standard error response
+      properties:
+        ErrorCode:
+          type: integer
+          description: HTTP status code
+          example: 404
+        ErrorMessage:
+          type: string
+          description: Human-readable description of the error
+          example: "Ticket not found"
+      required:
+        - ErrorCode
+        - ErrorMessage
+
+    # ── REQUEST BODIES ──────────────────────────
+
+    OpAnswerRequest:
+      type: object
+      description: Request body for OpAnswer — sets TTWOS ticket status to Answered
+      properties:
+        AnswerSubject:
+          type: string
+          description: Subject line of the answer
+          example: "Incident Resolved"
+        AnswerDescription:
+          type: string
+          description: |
+            ⚠️ PENDING — exact value not yet confirmed in requirements (marked [XXX]).
+            Must be agreed with Vodafone Germany before implementation.
+          example: "TBD"
+        SolutionDate:
+          type: string
+          format: date-time
+          description: Resolution date from Freshservice (TicketRegister.Movius_SolutionDate)
+          example: "2026-02-21T14:00:00Z"
+      required:
+        - AnswerSubject
+        - AnswerDescription
+        - SolutionDate
+
+    OpRejectRequest:
+      type: object
+      description: Request body for OpReject — sets TTWOS ticket status to Rejected
+      properties:
+        RejectionSubject:
+          type: string
+          description: Subject line of the rejection
+          example: "Additional Details Required"
+        RejectionDescription:
+          type: string
+          description: |
+            ⚠️ PENDING — exact value not yet confirmed in requirements (marked [XXX]).
+            Must be agreed with Vodafone Germany before implementation.
+          example: "TBD"
+      required:
+        - RejectionSubject
+        - RejectionDescription
+
+    OpAddContactRequest:
+      type: object
+      description: Request body for OpAddContact — adds a note or message to a TTWOS ticket
+      properties:
+        ContactMessage:
+          type: string
+          description: The note body text to be added to the ticket
+          example: "Incident has been escalated to Movius Engineering for review."
+        ContactMedium:
+          type: string
+          description: Medium through which the contact is being added
+          example: "Interface"
+        ContactSubject:
+          type: string
+          description: Subject line for the contact entry
+          example: "Incident Update"
+      required:
+        - ContactMessage
+        - ContactMedium
+        - ContactSubject
+
+    OpAddAttachmentRequest:
+      type: object
+      description: Request body for OpAddAttachment — uploads a file to a TTWOS ticket
+      properties:
+        AttachmentData:
+          type: string
+          format: binary
+          description: Binary content of the file to be attached
+      required:
+        - AttachmentData
+
+    OpUpdatePriorityRequest:
+      type: object
+      description: |
+        ⚠️ PLACEHOLDER — full endpoint path and schema not yet provided by Vodafone Germany.
+        Must be confirmed before implementation of priority sync from Freshservice to TTWOS.
+      properties:
+        Priority:
+          type: string
+          enum: ["1", "2", "3", "4"]
+          description: |
+            New TTWOS priority value. Reverse-mapped from Freshservice priority:
+              FS 4 (Urgent)  → TTWOS 1
+              FS 3 (High)    → TTWOS 2
+              FS 2 (Medium)  → TTWOS 3
+              FS 1 (Low)     → TTWOS 4
+      required:
+        - Priority
+
+# ─────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────
+paths:
+
+  # ════════════════════════════════════════════
+  # POLLING
+  # ════════════════════════════════════════════
+
+  /vendor/OpGetTicketListByModifyDate:
+    get:
+      operationId: getTicketListByModifyDate
+      summary: Poll for tickets modified within a date-time window
+      description: |
+        Entry point for all three AWS polling processes (Ticket Creation,
+        Ticket Updates, Ticket Correspondence). Called every 5 minutes, 24x7.
+
+        Returns all TTWOS tickets modified between DateTimeFrom and DateTimeTo.
+        Each returned TicketNumber is then passed to OpGetTicketById for full details.
+
+        Use cases: UC1, UC2, UC6, UC7, UC8, UC9, UC13, UC15, UC17–UC22, UC24
+      tags:
+        - Polling
+      parameters:
+        - name: DateTimeFrom
+          in: query
+          required: true
+          description: |
+            Start of polling window. Set to current system time minus 5 minutes.
+            Format: 2026-01-19T21:00:00Z
+          schema:
+            type: string
+            format: date-time
+            example: "2026-01-19T21:00:00Z"
+        - name: DateTimeTo
+          in: query
+          required: true
+          description: |
+            End of polling window. Set to current system time.
+            Format: 2026-01-19T21:05:00Z
+          schema:
+            type: string
+            format: date-time
+            example: "2026-01-19T21:05:00Z"
+      responses:
+        "200":
+          description: One or more tickets modified in the given window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketListResponse'
+        "204":
+          description: No tickets modified in the given window — nothing to process
+        "400":
+          description: Invalid or missing date-time parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpGetTicketById/{TicketNumber}:
+    get:
+      operationId: getTicketById
+      summary: Retrieve full details of a TTWOS ticket
+      description: |
+        Fetches the complete ticket record including current status, priority,
+        assignee/contact info, ContactList, and AttachmentList.
+
+        Called for every TicketNumber returned by OpGetTicketListByModifyDate
+        across all three polling processes.
+
+        Use cases: UC1, UC2, UC6, UC7, UC8, UC9, UC21, UC22, UC24
+      tags:
+        - Polling
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier (max 17 characters)
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      responses:
+        "200":
+          description: Full ticket details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketDetail'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpGetContact/{TicketNumber}/{ContactID}:
+    get:
+      operationId: getContact
+      summary: Retrieve a specific contact/note from a TTWOS ticket
+      description: |
+        Fetches the content of a specific contact entry on a ticket.
+        Only called when ContactList/ContactID is not empty in the OpGetTicketById response.
+
+        The ContactMessage is posted to Freshservice as a conversation note.
+        The contact Status field ("Answered", "Rejected") drives reopen logic —
+        if the ticket was updated more than 14 days ago, OpAnswer is called instead
+        with the "Unable to ReOpen" default message.
+
+        Use cases: UC7, UC8, UC9, UC13, UC17, UC18, UC19, UC20, UC21, UC22
+      tags:
+        - Polling
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+        - name: ContactID
+          in: path
+          required: true
+          description: Contact identifier from the ticket's ContactList array
+          schema:
+            type: string
+            example: "CTT000001"
+      responses:
+        "200":
+          description: Contact/note details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Contact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/OpGetAttachment/{TTWOS_ID}/{AttachmentName}:
+    get:
+      operationId: getAttachment
+      summary: Download an attachment file from a TTWOS ticket
+      description: |
+        Retrieves a specific file attachment from TTWOS.
+        Called once per file when unprocessed attachments are found in the
+        TicketAttachments AWS table. The downloaded file is forwarded to
+        Freshservice as part of a note with attachments via POST /notes.
+
+        Use cases: UC15, UC19, UC20
+      tags:
+        - Polling
+      parameters:
+        - name: TTWOS_ID
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+        - name: AttachmentName
+          in: path
+          required: true
+          description: File name from the ticket's AttachmentList array
+          schema:
+            type: string
+            maxLength: 255
+            example: "error_screenshot.png"
+      responses:
+        "200":
+          description: Raw file content of the attachment
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ════════════════════════════════════════════
+  # STATUS UPDATES
+  # ════════════════════════════════════════════
+
+  /vendor/OpNotice/{TicketNumber}:
+    patch:
+      operationId: noticeTicket
+      summary: Acknowledge a TTWOS ticket (status → Noticed)
+      description: |
+        Called immediately after a new TTWOS ticket has been successfully
+        created in Freshservice. Signals to TTWOS that the ticket has been
+        received and acknowledged by Movius.
+
+        Updates TicketRegister: no TTWOS status field equivalent — Noticed is
+        a transitional state only.
+
+        Use case: UC2
+
+        ⚠️ [ASSUMED] Request body may be empty — confirm with Vodafone Germany.
+      tags:
+        - Status Updates
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: false
+        description: "[ASSUMED] Body may be empty PATCH — confirm with Vodafone Germany"
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "[ASSUMED] No body fields documented — may not be required"
+      responses:
+        "200":
+          description: Ticket status updated to Noticed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpInProcess/{TicketNumber}:
+    patch:
+      operationId: setInProcess
+      summary: Set TTWOS ticket status to In Process
+      description: |
+        Called when a Freshservice ticket moves to In Progress (status 6),
+        or when a TTWOS ticket is reopened after Answered/Rejected and
+        processing resumes. Also called after posting a contact note during
+        reopen scenarios.
+
+        Updates TicketRegister.TTWOS_Status to "In Process".
+
+        Use cases: UC3, UC7, UC8, UC17, UC18, UC19, UC20, UC21, UC22
+
+        ⚠️ [ASSUMED] Request body may be empty — confirm with Vodafone Germany.
+      tags:
+        - Status Updates
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: false
+        description: "[ASSUMED] Body may be empty PATCH — confirm with Vodafone Germany"
+        content:
+          application/json:
+            schema:
+              type: object
+              description: "[ASSUMED] No body fields documented — may not be required"
+      responses:
+        "200":
+          description: Ticket status updated to In Process
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpAnswer/{TicketNumber}:
+    patch:
+      operationId: answerTicket
+      summary: Set TTWOS ticket status to Answered (Resolved)
+      description: |
+        Called in two scenarios:
+        1. Freshservice ticket moves to Resolved (status 4) — standard resolution flow.
+        2. A contact arrives on a ticket that was last updated more than 14 days ago —
+           ticket cannot be reopened; TTWOS is notified using the "Unable to ReOpen"
+           default message from the TicketDefaults table.
+
+        Updates TicketRegister.TTWOS_Status to "Answered".
+
+        Use cases: UC4, 14-day reopen limit
+
+        ⚠️ AnswerDescription value is pending confirmation from Vodafone Germany.
+      tags:
+        - Status Updates
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpAnswerRequest'
+            examples:
+              standardResolution:
+                summary: Ticket resolved by Movius
+                value:
+                  AnswerSubject: "Incident Resolved"
+                  AnswerDescription: "TBD — pending confirmation"
+                  SolutionDate: "2026-02-21T14:00:00Z"
+              unableToReopen:
+                summary: Ticket cannot be reopened (14-day limit)
+                value:
+                  AnswerSubject: "Unable to ReOpen"
+                  AnswerDescription: "Ticket has been closed for greater than 14 days, therefore cannot be reopened. If required please raise a new ticket."
+                  SolutionDate: "2026-01-07T09:00:00Z"
+      responses:
+        "200":
+          description: Ticket status updated to Answered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "400":
+          description: Invalid or missing request body fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpReject/{TicketNumber}:
+    patch:
+      operationId: rejectTicket
+      summary: Set TTWOS ticket status to Rejected
+      description: |
+        Called when a Freshservice ticket moves to With Customer (status 3 / Pending).
+        Signals to Vodafone that Movius requires additional information or action
+        from their side.
+
+        Updates TicketRegister.TTWOS_Status to "Rejected".
+
+        Use case: UC5
+
+        ⚠️ RejectionDescription value is pending confirmation from Vodafone Germany.
+      tags:
+        - Status Updates
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpRejectRequest'
+            example:
+              RejectionSubject: "Additional Details Required"
+              RejectionDescription: "TBD — pending confirmation"
+      responses:
+        "200":
+          description: Ticket status updated to Rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "400":
+          description: Invalid or missing request body fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /vendor/OpUpdatePriority/{TicketNumber}:
+    patch:
+      operationId: updatePriority
+      summary: "⚠️ Update ticket priority in TTWOS [ENDPOINT MISSING — TBD]"
+      description: |
+        ⚠️ OUTSTANDING — This endpoint has NOT been provided by Vodafone Germany.
+        The full path, HTTP method, and request body schema are all placeholders
+        and must be confirmed before this use case can be implemented.
+
+        Called when a Freshservice ticket priority changes. Freshservice priority
+        is reverse-mapped to TTWOS priority before sending:
+          FS 4 (Urgent)  → TTWOS 1 (Critical)
+          FS 3 (High)    → TTWOS 2 (Major)
+          FS 2 (Medium)  → TTWOS 3 (Minor)
+          FS 1 (Low)     → TTWOS 4 (Low)
+
+        Updates TicketRegister.TTWOS_Priority after successful call.
+
+        Use case: Priority sync from Freshservice to TTWOS
+      tags:
+        - Status Updates
+      parameters:
+        - name: TicketNumber
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: true
+        description: "⚠️ PLACEHOLDER schema — confirm with Vodafone Germany"
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpUpdatePriorityRequest'
+            example:
+              Priority: "2"
+      responses:
+        "200":
+          description: Priority updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ════════════════════════════════════════════
+  # CORRESPONDENCE
+  # ════════════════════════════════════════════
+
+  /contacts/OpAddContact/{TTWOS_ID}:
+    post:
+      operationId: addContact
+      summary: Add a note or contact message to a TTWOS ticket
+      description: |
+        Posts a note from Freshservice into a TTWOS ticket. Also used to
+        send informational messages to TTWOS for Movius-internal status
+        transitions that have no direct TTWOS status equivalent
+        (Engineering Review, Awaiting Fix).
+
+        Use cases: UC14, UC16, FS status 7 (Engineering Review), FS status 8 (Awaiting Fix)
+      tags:
+        - Correspondence
+      parameters:
+        - name: TTWOS_ID
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpAddContactRequest'
+            examples:
+              incidentUpdate:
+                summary: Standard note forwarded from Freshservice
+                value:
+                  ContactMessage: "Customer has provided additional details for investigation."
+                  ContactMedium: "Interface"
+                  ContactSubject: "Incident Update"
+              engineeringReview:
+                summary: Movius Engineering escalation notification
+                value:
+                  ContactMessage: "Incident has been escalated to Movius Engineering for review."
+                  ContactMedium: "Interface"
+                  ContactSubject: "Movius Engineering Review"
+              awaitingFix:
+                summary: Movius Engineering fix required notification
+                value:
+                  ContactMessage: "Movius Engineering has determined a fix is required."
+                  ContactMedium: "Interface"
+                  ContactSubject: "Fix Required"
+      responses:
+        "200":
+          description: Contact note added successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "201":
+          description: Contact note created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "400":
+          description: Invalid or missing request body fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /attachments/OpAddAttachment/{TTWOS_ID}/{AttachmentName}:
+    post:
+      operationId: addAttachment
+      summary: Upload an attachment to a TTWOS ticket
+      description: |
+        Uploads a file from Freshservice to a TTWOS ticket.
+        Called once per file after OpAddContact when the Freshservice note
+        includes attachments. Loop through all attachment files — one API
+        call per file.
+
+        Use case: UC16
+      tags:
+        - Correspondence
+      parameters:
+        - name: TTWOS_ID
+          in: path
+          required: true
+          description: TTWOS ticket identifier
+          schema:
+            type: string
+            maxLength: 17
+            example: "INC000001234567"
+        - name: AttachmentName
+          in: path
+          required: true
+          description: File name of the attachment being uploaded
+          schema:
+            type: string
+            maxLength: 255
+            example: "error_screenshot.png"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpAddAttachmentRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                AttachmentData:
+                  type: string
+                  format: binary
+                  description: Binary content of the file being uploaded
+      responses:
+        "200":
+          description: Attachment uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "201":
+          description: Attachment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Unauthorized — ⚠️ auth mechanism TBD
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Ticket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "413":
+          description: Attachment file size too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
